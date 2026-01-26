@@ -9,6 +9,7 @@ import { INotebookTracker } from '@jupyterlab/notebook';
 import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
 import { registerFileCommands } from './file-commands';
+import { registerKernelCommands } from './kernel-commands';
 import { registerNotebookCommands } from './notebook-commands';
 
 /**
@@ -43,6 +44,13 @@ const plugin: JupyterFrontEndPlugin<void> = {
       docManager,
       kernelSpecManager,
       notebookTracker
+    });
+
+    const kernelManager = app.serviceManager.kernels;
+    registerKernelCommands({
+      commands,
+      kernelManager,
+      kernelSpecManager
     });
 
     if (settingRegistry) {
