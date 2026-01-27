@@ -1,5 +1,46 @@
-import { Kernel, KernelSpec } from '@jupyterlab/services';
+import { Kernel, KernelMessage, KernelSpec } from '@jupyterlab/services';
+import * as nbformat from '@jupyterlab/nbformat';
 import { CommandRegistry } from '@lumino/commands';
+
+/**
+ * Information about a running kernel
+ */
+type KernelListItem = Pick<
+  Kernel.IModel,
+  'id' | 'name' | 'execution_state' | 'last_activity' | 'connections'
+>;
+
+/**
+ * Information about a kernel spec
+ */
+interface IKernelSpecInfo {
+  name: string;
+  display_name: KernelSpec.ISpecModel['display_name'];
+  language: KernelSpec.ISpecModel['language'];
+}
+
+/**
+ * Kernel execution status
+ */
+type KernelExecutionStatus = 'ok' | 'error' | 'abort';
+
+/**
+ * Kernel execution output format (nbformat)
+ */
+type KernelExecutionOutput = nbformat.IOutput;
+
+/**
+ * Result of kernel code execution
+ */
+interface IKernelExecutionResult {
+  success: boolean;
+  status: KernelExecutionStatus;
+  executionCount: nbformat.ExecutionCount;
+  outputs: KernelExecutionOutput[];
+  errorName?: string;
+  errorValue?: string;
+  traceback?: string[];
+}
 
 /**
  * Find a kernel by language, returning the kernel spec name
@@ -67,7 +108,7 @@ function registerStartKernelCommand(
       }
     },
     execute: async (args: any) => {
-      const { language, kernelName } = args;
+      const { language = null, kernelName = null } = args;
 
       let targetKernelName: string;
 
@@ -174,9 +215,9 @@ function registerExecuteInKernelCommand(
         throw new Error(`No running kernel found with ID: ${kernelId}`);
       }
 
-      const outputs: any[] = [];
+      const outputs: KernelExecutionOutput[] = [];
       let executionCount: number | null = null;
-      let status: string = 'ok';
+      let status: KernelExecutionStatus = 'ok';
       let errorName: string | undefined;
       let errorValue: string | undefined;
       let traceback: string[] | undefined;
@@ -190,35 +231,50 @@ function registerExecuteInKernelCommand(
         stop_on_error: stopOnError
       });
 
-      future.onIOPub = (msg: any) => {
-        const msgType = msg.header.msg_type;
-        const content = msg.content;
-
-        if (msgType === 'stream') {
+      future.onIOPub = (msg: KernelMessage.IIOPubMessage) => {
+        if (KernelMessage.isStreamMsg(msg)) {
           outputs.push({
             output_type: 'stream',
-            name: content.name,
-            text: content.text
+            name: msg.content.name,
+            text: msg.content.text
           });
-        } else if (msgType === 'display_data') {
+          return;
+        }
+
+        if (KernelMessage.isDisplayDataMsg(msg)) {
           outputs.push({
             output_type: 'display_data',
-            data: content.data,
-            metadata: content.metadata
+            data: msg.content.data,
+            metadata: msg.content.metadata
           });
-        } else if (msgType === 'execute_result') {
+          return;
+        }
+
+        if (KernelMessage.isUpdateDisplayDataMsg(msg)) {
+          outputs.push({
+            output_type: 'update_display_data',
+            data: msg.content.data,
+            metadata: msg.content.metadata
+          });
+          return;
+        }
+
+        if (KernelMessage.isExecuteResultMsg(msg)) {
           outputs.push({
             output_type: 'execute_result',
-            data: content.data,
-            metadata: content.metadata,
-            execution_count: content.execution_count
+            data: msg.content.data,
+            metadata: msg.content.metadata,
+            execution_count: msg.content.execution_count
           });
-        } else if (msgType === 'error') {
+          return;
+        }
+
+        if (KernelMessage.isErrorMsg(msg)) {
           outputs.push({
             output_type: 'error',
-            ename: content.ename,
-            evalue: content.evalue,
-            traceback: content.traceback
+            ename: msg.content.ename,
+            evalue: msg.content.evalue,
+            traceback: msg.content.traceback
           });
         }
       };
@@ -226,10 +282,11 @@ function registerExecuteInKernelCommand(
       const reply = await future.done;
 
       if (reply.content.status === 'ok') {
-        executionCount = (reply.content as any).execution_count;
+        executionCount = (reply.content as KernelMessage.IExecuteReply)
+          .execution_count;
       } else if (reply.content.status === 'error') {
         status = 'error';
-        const errorContent = reply.content as any;
+        const errorContent = reply.content as KernelMessage.IReplyErrorContent;
         errorName = errorContent.ename;
         errorValue = errorContent.evalue;
         traceback = errorContent.traceback;
@@ -239,7 +296,7 @@ function registerExecuteInKernelCommand(
 
       kernel.dispose();
 
-      const result: any = {
+      const result: IKernelExecutionResult = {
         success: status === 'ok',
         status,
         executionCount,
@@ -324,7 +381,7 @@ function registerListKernelsCommand(
       await kernelManager.ready;
       await kernelManager.refreshRunning();
 
-      const kernels: any[] = [];
+      const kernels: KernelListItem[] = [];
       for (const kernel of kernelManager.running()) {
         kernels.push({
           id: kernel.id,
@@ -339,6 +396,57 @@ function registerListKernelsCommand(
         success: true,
         kernels,
         count: kernels.length
+      };
+    }
+  };
+
+  commands.addCommand(command.id, command);
+}
+
+/**
+ * List all available kernel specs
+ */
+function registerListKernelSpecsCommand(
+  commands: CommandRegistry,
+  kernelSpecManager: KernelSpec.IManager
+): void {
+  const command = {
+    id: 'jupyterlab-ai-commands:list-kernelspecs',
+    label: 'List Kernel Specs',
+    caption: 'List all available kernel specs',
+    describedBy: {
+      args: {}
+    },
+    execute: async () => {
+      await kernelSpecManager.ready;
+      const specs = kernelSpecManager.specs;
+
+      if (!specs || !specs.kernelspecs) {
+        return {
+          success: true,
+          kernelspecs: [] as IKernelSpecInfo[],
+          count: 0,
+          default: null
+        };
+      }
+
+      const kernelspecs: IKernelSpecInfo[] = [];
+      for (const [name, spec] of Object.entries(specs.kernelspecs)) {
+        if (!spec) {
+          continue;
+        }
+        kernelspecs.push({
+          name,
+          display_name: spec.display_name,
+          language: spec.language
+        });
+      }
+
+      return {
+        success: true,
+        kernelspecs,
+        count: kernelspecs.length,
+        default: specs.default
       };
     }
   };
@@ -367,4 +475,5 @@ export function registerKernelCommands(
   registerExecuteInKernelCommand(commands, kernelManager);
   registerShutdownKernelCommand(commands, kernelManager);
   registerListKernelsCommand(commands, kernelManager);
+  registerListKernelSpecsCommand(commands, kernelSpecManager);
 }
