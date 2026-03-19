@@ -89,34 +89,33 @@ This extension provides the following commands for AI-assisted interactions with
     - `cellType` (string, optional): Type of cell to add - "code", "markdown", or "raw" (default: "code")
     - `position` (string, optional): Position relative to current cell - "above" or "below" (default: "below")
 
-- **`jupyterlab-ai-commands:get-notebook-info`** - Get information about a notebook including number of cells and active cell index
+- **`jupyterlab-ai-commands:get-notebook-info`** - Get information about a notebook including number of cells, stable cell IDs, and the active cell ID
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
 
 - **`jupyterlab-ai-commands:get-cell-info`** - Get information about a specific cell including its type, source content, and outputs
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
-    - `cellIndex` (number, optional): Index of the cell to get information for (0-based). If not provided, uses the currently active cell
+    - `cellId` (string, optional): Stable nbformat cell ID of the cell to inspect. If not provided, uses the currently active cell
 
 - **`jupyterlab-ai-commands:set-cell-content`** - Set the content of a specific cell
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
-    - `cellId` (string, optional): ID of the cell to modify. If provided, takes precedence over cellIndex
-    - `cellIndex` (number, optional): Index of the cell to modify (0-based). Used if cellId is not provided. If neither is provided, targets the active cell
+    - `cellId` (string, optional): Stable nbformat cell ID of the cell to modify. If not provided, targets the currently active cell
     - `content` (string): New content for the cell
     - `showDiff` (boolean, optional): Whether to show a diff view of the changes (default: true)
     - `diffMode` (string, optional): Display mode for the diff view - "unified" or "split" (default: "unified")
 
-- **`jupyterlab-ai-commands:run-cell`** - Run a specific cell in the notebook by index
+- **`jupyterlab-ai-commands:run-cell`** - Run a specific cell in the notebook by cell ID
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
-    - `cellIndex` (number): Index of the cell to run (0-based)
+    - `cellId` (string): Stable nbformat cell ID of the cell to run
     - `recordTiming` (boolean, optional): Whether to record execution timing (default: true)
 
-- **`jupyterlab-ai-commands:delete-cell`** - Delete a specific cell from the notebook by index
+- **`jupyterlab-ai-commands:delete-cell`** - Delete a specific cell from the notebook by cell ID
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
-    - `cellIndex` (number): Index of the cell to delete (0-based)
+    - `cellId` (string): Stable nbformat cell ID of the cell to delete
 
 - **`jupyterlab-ai-commands:save-notebook`** - Save a specific notebook to disk
   - Arguments:
