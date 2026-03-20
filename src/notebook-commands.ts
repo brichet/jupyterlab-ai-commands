@@ -334,7 +334,7 @@ function registerAddCellCommand(
 }
 
 /**
- * Get information about a notebook including stable cell IDs and the active cell ID
+ * Get information about a notebook including cell IDs and the active cell ID
  */
 function registerGetNotebookInfoCommand(
   commands: CommandRegistry,
@@ -345,7 +345,7 @@ function registerGetNotebookInfoCommand(
     id: 'jupyterlab-ai-commands:get-notebook-info',
     label: 'Get Notebook Info',
     caption:
-      'Get information about a notebook including stable cell IDs and the active cell ID',
+      'Get information about a notebook including cell IDs and the active cell ID',
     describedBy: {
       args: {
         type: 'object',
@@ -439,7 +439,7 @@ function registerGetCellInfoCommand(
           cellId: {
             type: 'string',
             description:
-              'Stable nbformat cell ID of the cell to get information for. If not provided, uses the currently active cell'
+              'nbformat cell ID of the cell to get information for. If not provided, uses the currently active cell'
           },
           background: {
             type: 'boolean',
@@ -516,7 +516,7 @@ function registerSetCellContentCommand(
           cellId: {
             type: 'string',
             description:
-              'Stable nbformat cell ID of the cell to modify. If not provided, targets the currently active cell'
+              'nbformat cell ID of the cell to modify. If not provided, targets the currently active cell'
           },
           content: {
             type: 'string',
@@ -635,7 +635,7 @@ function registerRunCellCommand(
           },
           cellId: {
             type: 'string',
-            description: 'Stable nbformat cell ID of the cell to run'
+            description: 'nbformat cell ID of the cell to run'
           },
           recordTiming: {
             type: 'boolean',
@@ -727,7 +727,7 @@ function registerDeleteCellCommand(
           },
           cellId: {
             type: 'string',
-            description: 'Stable nbformat cell ID of the cell to delete'
+            description: 'nbformat cell ID of the cell to delete'
           },
           background: {
             type: 'boolean',
