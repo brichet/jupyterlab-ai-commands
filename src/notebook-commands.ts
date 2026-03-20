@@ -203,12 +203,6 @@ function registerCreateNotebookCommand(
 
       await notebook.context.ready;
 
-      // Ensure nbformat_minor >= 5 so cell IDs are preserved on save
-      const model = notebook.content.model;
-      if (model && model.sharedModel.nbformat_minor < 5) {
-        model.sharedModel.nbformat_minor = 5;
-      }
-
       await notebook.context.save();
 
       return {
