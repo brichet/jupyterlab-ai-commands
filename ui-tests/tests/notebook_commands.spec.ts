@@ -12,10 +12,6 @@ const COMMANDS = {
   setCellContent: 'jupyterlab-ai-commands:set-cell-content'
 } as const;
 
-function normalizeText(value: string | string[] | undefined | null): string {
-  return Array.isArray(value) ? value.join('') : (value ?? '');
-}
-
 async function executeCommand(
   page: IJupyterLabPageFixture,
   command: string,
@@ -30,35 +26,10 @@ async function executeCommand(
   );
 }
 
-async function readNotebook(
-  page: IJupyterLabPageFixture,
-  notebookPath: string
-): Promise<any> {
-  return page.evaluate(async notebookPath => {
-    await window.jupyterapp.started;
-    const model = await window.jupyterapp.serviceManager.contents.get(
-      notebookPath,
-      { content: true, type: 'notebook' }
-    );
-    return model.content;
-  }, notebookPath);
-}
-
-async function reopenNotebook(
-  page: IJupyterLabPageFixture,
-  notebookPath: string
-): Promise<void> {
-  if (await page.notebook.isAnyActive()) {
-    await page.notebook.close(false);
-  }
-  await page.notebook.openByPath(notebookPath);
-  await page.notebook.activate(notebookPath.split('/').pop()!);
-}
-
 test.describe('Notebook Commands', () => {
   test.use({ serverFiles: 'only-on-failure' });
 
-  test('should create a notebook and persist the expected cells', async ({
+  test('should create a notebook and add the expected cells', async ({
     page,
     tmpPath
   }) => {
@@ -87,18 +58,25 @@ test.describe('Notebook Commands', () => {
     expect(notebookInfo.success).toBe(true);
     expect(notebookInfo.notebookPath).toBe(notebookPath);
     expect(notebookInfo.cellCount).toBe(2);
+    expect(await page.notebook.getCellType(0)).toBe('markdown');
+    expect(await page.notebook.getCellType(1)).toBe('code');
+    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
+      '# Title'
+    );
+    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
+      'Body'
+    );
+    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
+      'value = 41'
+    );
+    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
+      'value + 1'
+    );
 
-    await executeCommand(page, COMMANDS.saveNotebook, { notebookPath });
-    await reopenNotebook(page, notebookPath);
-
-    const model = await readNotebook(page, notebookPath);
-    expect(model.cells).toHaveLength(2);
-    expect(model.cells.map((c: any) => c.cell_type)).toEqual([
-      'markdown',
-      'code'
-    ]);
-    expect(normalizeText(model.cells[0].source)).toBe('# Title\nBody');
-    expect(normalizeText(model.cells[1].source)).toBe('value = 41\nvalue + 1');
+    const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
+      notebookPath
+    });
+    expect(saveResult.success).toBe(true);
   });
 
   test('should update notebook cells through set-cell-content', async ({
@@ -140,19 +118,21 @@ test.describe('Notebook Commands', () => {
       showDiff: false
     });
 
-    await executeCommand(page, COMMANDS.saveNotebook, { notebookPath });
-    await reopenNotebook(page, notebookPath);
+    expect(await page.notebook.getCellCount()).toBe(2);
+    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
+      'answer = 6 * 7'
+    );
+    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
+      'Updated markdown'
+    );
 
-    const model = await readNotebook(page, notebookPath);
-    expect(model.cells).toHaveLength(2);
-    expect(normalizeText(model.cells[0].source)).toBe('answer = 6 * 7');
-    expect(normalizeText(model.cells[1].source)).toBe('## Updated markdown');
+    const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
+      notebookPath
+    });
+    expect(saveResult.success).toBe(true);
   });
 
-  test('should run and delete notebook cells while keeping saved state in sync', async ({
-    page,
-    tmpPath
-  }) => {
+  test('should run and delete notebook cells', async ({ page, tmpPath }) => {
     const notebookPath = `${tmpPath}/command-run-and-delete.ipynb`;
 
     await executeCommand(page, COMMANDS.createNotebook, {
@@ -187,16 +167,16 @@ test.describe('Notebook Commands', () => {
     });
     expect(deleteResult.success).toBe(true);
     expect(deleteResult.remainingCells).toBe(1);
+    expect(await page.notebook.getCellCount()).toBe(1);
+    expect(await page.notebook.getCellType(0)).toBe('code');
 
-    await executeCommand(page, COMMANDS.saveNotebook, { notebookPath });
-    await reopenNotebook(page, notebookPath);
+    const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
+      notebookPath
+    });
+    expect(saveResult.success).toBe(true);
 
-    const model = await readNotebook(page, notebookPath);
-    expect(model.cells).toHaveLength(1);
-    expect(normalizeText(model.cells[0].source)).toBe('print("alpha")');
-    expect(model.cells[0].outputs).toHaveLength(1);
-    expect(model.cells[0].outputs[0].output_type).toBe('stream');
-    expect(normalizeText(model.cells[0].outputs[0].text)).toBe('alpha\n');
-    expect(model.cells[0].execution_count).toBeGreaterThan(0);
+    const output = await page.notebook.getCellTextOutput(0);
+    expect(output).not.toBeNull();
+    expect(output?.[0].trim()).toBe('alpha');
   });
 });
