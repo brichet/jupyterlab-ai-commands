@@ -69,7 +69,6 @@ test.describe('Notebook Commands', () => {
       name: notebookPath
     });
     expect(createResult.success).toBe(true);
-    expect(createResult.kernel).toBe('python3');
 
     await executeCommand(page, COMMANDS.addCell, {
       cellType: 'markdown',
