@@ -10,6 +10,7 @@ import {
   INotebookTracker,
   NotebookPanel
 } from '@jupyterlab/notebook';
+import type { YNotebook } from '@jupyter/ydoc';
 import { KernelSpec } from '@jupyterlab/services';
 import { CommandRegistry } from '@lumino/commands';
 
@@ -202,6 +203,13 @@ function registerCreateNotebookCommand(
       }
 
       await notebook.context.ready;
+
+      // Persist cell IDs by saving newly created notebooks as nbformat 4.5+.
+      const model = getNotebookModel(notebook);
+      const sharedModel = model.sharedModel as YNotebook;
+      if (sharedModel.nbformat_minor < 5) {
+        sharedModel.nbformat_minor = 5;
+      }
 
       await notebook.context.save();
 
