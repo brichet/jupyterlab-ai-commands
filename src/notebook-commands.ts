@@ -202,6 +202,13 @@ function registerCreateNotebookCommand(
       }
 
       await notebook.context.ready;
+
+      // Ensure nbformat_minor >= 5 so cell IDs are preserved on save
+      const model = notebook.content.model;
+      if (model && model.sharedModel.nbformat_minor < 5) {
+        model.sharedModel.nbformat_minor = 5;
+      }
+
       await notebook.context.save();
 
       return {
@@ -669,7 +676,10 @@ function registerRunCellCommand(
 
       const notebook = currentWidget.content;
       const model = getNotebookModel(currentWidget);
-      const { cellIndex: targetCellIndex } = getCellTarget(currentWidget, cellId);
+      const { cellIndex: targetCellIndex } = getCellTarget(
+        currentWidget,
+        cellId
+      );
       const cellWidget = notebook.widgets[targetCellIndex];
       if (!cellWidget) {
         throw new Error(`Cell widget with ID '${cellId}' not found`);
@@ -756,7 +766,10 @@ function registerDeleteCellCommand(
       }
 
       const model = getNotebookModel(currentWidget);
-      const { cellIndex: targetCellIndex } = getCellTarget(currentWidget, cellId);
+      const { cellIndex: targetCellIndex } = getCellTarget(
+        currentWidget,
+        cellId
+      );
 
       model.sharedModel.deleteCell(targetCellIndex);
 
