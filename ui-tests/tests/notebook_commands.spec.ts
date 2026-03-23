@@ -1,3 +1,4 @@
+import type { Locator } from '@playwright/test';
 import type { IJupyterLabPageFixture } from '@jupyterlab/galata';
 import { expect, test } from '@jupyterlab/galata';
 
@@ -26,6 +27,27 @@ async function executeCommand(
   );
 }
 
+async function getCellInputLocator(
+  page: IJupyterLabPageFixture,
+  cellIndex: number
+): Promise<Locator> {
+  const locator = await page.notebook.getCellInputLocator(cellIndex);
+
+  if (!locator) {
+    throw new Error(`Could not find input locator for cell ${cellIndex}`);
+  }
+
+  return locator;
+}
+
+async function expectCellInputToContainText(
+  page: IJupyterLabPageFixture,
+  cellIndex: number,
+  text: string
+): Promise<void> {
+  await expect(await getCellInputLocator(page, cellIndex)).toContainText(text);
+}
+
 test.describe('Notebook Commands', () => {
   test.use({ serverFiles: 'only-on-failure' });
 
@@ -41,12 +63,12 @@ test.describe('Notebook Commands', () => {
     });
     expect(createResult.success).toBe(true);
 
-    await executeCommand(page, COMMANDS.addCell, {
+    const markdownCell = await executeCommand(page, COMMANDS.addCell, {
       cellType: 'markdown',
       content: '# Title\nBody',
       notebookPath
     });
-    await executeCommand(page, COMMANDS.addCell, {
+    const codeCell = await executeCommand(page, COMMANDS.addCell, {
       cellType: 'code',
       content: 'value = 41\nvalue + 1',
       notebookPath
@@ -58,25 +80,71 @@ test.describe('Notebook Commands', () => {
     expect(notebookInfo.success).toBe(true);
     expect(notebookInfo.notebookPath).toBe(notebookPath);
     expect(notebookInfo.cellCount).toBe(2);
+    expect(notebookInfo.cells).toEqual([
+      { cellId: markdownCell.cellId, cellType: 'markdown' },
+      { cellId: codeCell.cellId, cellType: 'code' }
+    ]);
     expect(await page.notebook.getCellType(0)).toBe('markdown');
     expect(await page.notebook.getCellType(1)).toBe('code');
-    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
-      '# Title'
-    );
-    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
-      'Body'
-    );
-    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
-      'value = 41'
-    );
-    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
-      'value + 1'
-    );
+    await expectCellInputToContainText(page, 0, '# Title');
+    await expectCellInputToContainText(page, 0, 'Body');
+    await expectCellInputToContainText(page, 1, 'value = 41');
+    await expectCellInputToContainText(page, 1, 'value + 1');
 
     const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
       notebookPath
     });
     expect(saveResult.success).toBe(true);
+  });
+
+  test('should insert cells relative to a reference cell id', async ({
+    page,
+    tmpPath
+  }) => {
+    const notebookPath = `${tmpPath}/command-add-cell-by-id.ipynb`;
+
+    await executeCommand(page, COMMANDS.createNotebook, {
+      language: 'python',
+      name: notebookPath
+    });
+
+    const firstCell = await executeCommand(page, COMMANDS.addCell, {
+      content: 'first = 1',
+      notebookPath
+    });
+    const thirdCell = await executeCommand(page, COMMANDS.addCell, {
+      content: 'third = 3',
+      notebookPath
+    });
+    const secondCell = await executeCommand(page, COMMANDS.addCell, {
+      referenceCellId: firstCell.cellId,
+      content: 'second = 2',
+      notebookPath,
+      position: 'below'
+    });
+    const zerothCell = await executeCommand(page, COMMANDS.addCell, {
+      referenceCellId: firstCell.cellId,
+      content: 'zeroth = 0',
+      notebookPath,
+      position: 'above'
+    });
+
+    const notebookInfo = await executeCommand(page, COMMANDS.getNotebookInfo, {
+      notebookPath
+    });
+
+    expect(notebookInfo.cellCount).toBe(4);
+    expect(notebookInfo.cells.map((cell: any) => cell.cellId)).toEqual([
+      zerothCell.cellId,
+      firstCell.cellId,
+      secondCell.cellId,
+      thirdCell.cellId
+    ]);
+
+    await expectCellInputToContainText(page, 0, 'zeroth = 0');
+    await expectCellInputToContainText(page, 1, 'first = 1');
+    await expectCellInputToContainText(page, 2, 'second = 2');
+    await expectCellInputToContainText(page, 3, 'third = 3');
   });
 
   test('should update notebook cells through set-cell-content', async ({
@@ -89,42 +157,37 @@ test.describe('Notebook Commands', () => {
       language: 'python',
       name: notebookPath
     });
-    await executeCommand(page, COMMANDS.addCell, {
+    const codeCell = await executeCommand(page, COMMANDS.addCell, {
       content: 'before = 1',
       notebookPath
     });
-    await executeCommand(page, COMMANDS.addCell, {
+    const markdownCell = await executeCommand(page, COMMANDS.addCell, {
       cellType: 'markdown',
       content: 'Old text',
       notebookPath
     });
 
-    // Need the cellId to test setCellContent by cellId
-    const markdownCell = await executeCommand(page, COMMANDS.getCellInfo, {
-      cellIndex: 1,
-      notebookPath
+    const codeUpdate = await executeCommand(page, COMMANDS.setCellContent, {
+      cellId: codeCell.cellId,
+      content: 'answer = 6 * 7',
+      notebookPath,
+      showDiff: false
     });
-
-    await executeCommand(page, COMMANDS.setCellContent, {
+    const markdownUpdate = await executeCommand(page, COMMANDS.setCellContent, {
       cellId: markdownCell.cellId,
       content: '## Updated markdown',
       notebookPath,
       showDiff: false
     });
-    await executeCommand(page, COMMANDS.setCellContent, {
-      cellIndex: 0,
-      content: 'answer = 6 * 7',
-      notebookPath,
-      showDiff: false
-    });
+
+    expect(codeUpdate.cellId).toBe(codeCell.cellId);
+    expect(codeUpdate.previousContent).toBe('before = 1');
+    expect(markdownUpdate.cellId).toBe(markdownCell.cellId);
+    expect(markdownUpdate.previousContent).toBe('Old text');
 
     expect(await page.notebook.getCellCount()).toBe(2);
-    await expect(await page.notebook.getCellInputLocator(0)).toContainText(
-      'answer = 6 * 7'
-    );
-    await expect(await page.notebook.getCellInputLocator(1)).toContainText(
-      'Updated markdown'
-    );
+    await expectCellInputToContainText(page, 0, 'answer = 6 * 7');
+    await expectCellInputToContainText(page, 1, 'Updated markdown');
 
     const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
       notebookPath
@@ -139,18 +202,18 @@ test.describe('Notebook Commands', () => {
       language: 'python',
       name: notebookPath
     });
-    await executeCommand(page, COMMANDS.addCell, {
+    const alphaCell = await executeCommand(page, COMMANDS.addCell, {
       content: 'print("alpha")',
       notebookPath
     });
-    await executeCommand(page, COMMANDS.addCell, {
+    const betaCell = await executeCommand(page, COMMANDS.addCell, {
       content: 'print("beta")',
       notebookPath
     });
     await page.locator('#jp-main-statusbar').getByText('Idle').waitFor();
 
     const runResult = await executeCommand(page, COMMANDS.runCell, {
-      cellIndex: 0,
+      cellId: alphaCell.cellId,
       notebookPath
     });
     expect(runResult.success).toBe(true);
@@ -162,13 +225,20 @@ test.describe('Notebook Commands', () => {
     });
 
     const deleteResult = await executeCommand(page, COMMANDS.deleteCell, {
-      cellIndex: 1,
+      cellId: betaCell.cellId,
       notebookPath
     });
     expect(deleteResult.success).toBe(true);
     expect(deleteResult.remainingCells).toBe(1);
     expect(await page.notebook.getCellCount()).toBe(1);
     expect(await page.notebook.getCellType(0)).toBe('code');
+
+    const notebookInfo = await executeCommand(page, COMMANDS.getNotebookInfo, {
+      notebookPath
+    });
+    expect(notebookInfo.cells).toEqual([
+      { cellId: alphaCell.cellId, cellType: 'code' }
+    ]);
 
     const saveResult = await executeCommand(page, COMMANDS.saveNotebook, {
       notebookPath

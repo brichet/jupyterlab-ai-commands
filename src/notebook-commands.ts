@@ -248,6 +248,11 @@ function registerAddCellCommand(
             description:
               'Path to the notebook file. If not provided, uses the currently active notebook'
           },
+          referenceCellId: {
+            type: 'string',
+            description:
+              'nbformat cell ID of the reference cell. If not provided, uses the currently active cell'
+          },
           content: {
             type: 'string',
             description: 'Content to add to the cell'
@@ -258,7 +263,8 @@ function registerAddCellCommand(
           },
           position: {
             type: 'string',
-            description: 'Position relative to current cell (above or below)'
+            description:
+              'Position relative to the reference or active cell (above or below)'
           },
           background: {
             type: 'boolean',
@@ -271,6 +277,7 @@ function registerAddCellCommand(
     execute: async (args: any) => {
       const {
         notebookPath,
+        referenceCellId,
         background,
         content = null,
         cellType = 'code',
@@ -292,18 +299,30 @@ function registerAddCellCommand(
       }
 
       const notebook = currentWidget.content;
-      const model = notebook.model;
+      const model = getNotebookModel(currentWidget);
 
-      if (!model) {
-        throw new Error('No notebook model available');
+      if (position !== 'above' && position !== 'below') {
+        throw new Error(
+          `Invalid position '${position}'. Expected 'above' or 'below'.`
+        );
       }
 
       const shouldReplaceFirstCell =
         model.cells.length === 1 &&
         model.cells.get(0).sharedModel.getSource().trim() === '';
 
+      let insertIndex = model.cells.length;
       if (shouldReplaceFirstCell) {
         model.sharedModel.deleteCell(0);
+        insertIndex = 0;
+      } else if (model.cells.length > 0) {
+        const { cellIndex: referenceCellIndex } = getCellTarget(
+          currentWidget,
+          referenceCellId
+        );
+
+        insertIndex =
+          position === 'above' ? referenceCellIndex : referenceCellIndex + 1;
       }
 
       const newCellData = {
@@ -312,8 +331,8 @@ function registerAddCellCommand(
         metadata: cellType === 'code' ? { trusted: true } : {}
       };
 
-      model.sharedModel.addCell(newCellData);
-      const newCellIndex = model.cells.length - 1;
+      model.sharedModel.insertCell(insertIndex, newCellData);
+      const newCellIndex = insertIndex;
       const newCell = model.cells.get(newCellIndex);
 
       if (!newCell) {

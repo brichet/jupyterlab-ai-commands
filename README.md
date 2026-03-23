@@ -85,9 +85,10 @@ This extension provides the following commands for AI-assisted interactions with
 - **`jupyterlab-ai-commands:add-cell`** - Add a cell to the current notebook with optional content
   - Arguments:
     - `notebookPath` (string, optional): Path to the notebook file. If not provided, uses the currently active notebook
+    - `referenceCellId` (string, optional): nbformat cell ID of the reference cell. If not provided, uses the currently active cell
     - `content` (string, optional): Content to add to the cell
     - `cellType` (string, optional): Type of cell to add - "code", "markdown", or "raw" (default: "code")
-    - `position` (string, optional): Position relative to current cell - "above" or "below" (default: "below")
+    - `position` (string, optional): Position relative to the reference or active cell - "above" or "below" (default: "below")
 
 - **`jupyterlab-ai-commands:get-notebook-info`** - Get information about a notebook including number of cells, cell IDs, and the active cell ID
   - Arguments:
