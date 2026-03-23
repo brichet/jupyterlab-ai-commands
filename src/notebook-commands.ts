@@ -1,6 +1,16 @@
-import { CodeCell, ICodeCellModel, MarkdownCell } from '@jupyterlab/cells';
+import {
+  CodeCell,
+  ICellModel,
+  ICodeCellModel,
+  MarkdownCell
+} from '@jupyterlab/cells';
 import { IDocumentManager } from '@jupyterlab/docmanager';
-import { INotebookTracker, NotebookPanel } from '@jupyterlab/notebook';
+import {
+  INotebookModel,
+  INotebookTracker,
+  NotebookPanel
+} from '@jupyterlab/notebook';
+import type { YNotebook } from '@jupyter/ydoc';
 import { KernelSpec } from '@jupyterlab/services';
 import { CommandRegistry } from '@lumino/commands';
 
@@ -68,6 +78,61 @@ function getNotebookWidget(
   } else {
     return notebookTracker?.currentWidget || null;
   }
+}
+
+function getNotebookModel(notebookPanel: NotebookPanel): INotebookModel {
+  const model = notebookPanel.content.model;
+
+  if (!model) {
+    throw new Error('No notebook model available');
+  }
+
+  return model;
+}
+
+function findCellIndexById(model: INotebookModel, cellId: string): number {
+  for (let i = 0; i < model.cells.length; i++) {
+    if (model.cells.get(i).id === cellId) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
+function getCellTarget(
+  notebookPanel: NotebookPanel,
+  cellId?: string | null
+): { cell: ICellModel; cellIndex: number } {
+  const notebook = notebookPanel.content;
+  const model = getNotebookModel(notebookPanel);
+
+  if (cellId !== undefined && cellId !== null) {
+    const cellIndex = findCellIndexById(model, cellId);
+
+    if (cellIndex === -1) {
+      throw new Error(`Cell with ID '${cellId}' not found in notebook`);
+    }
+
+    const cell = model.cells.get(cellIndex);
+    if (!cell) {
+      throw new Error(`Cell with ID '${cellId}' not found in notebook`);
+    }
+
+    return { cell, cellIndex };
+  }
+
+  const cellIndex = notebook.activeCellIndex;
+  if (cellIndex === -1 || cellIndex >= model.cells.length) {
+    throw new Error('No active cell or invalid active cell index');
+  }
+
+  const cell = model.cells.get(cellIndex);
+  if (!cell) {
+    throw new Error(`Cell at active index ${cellIndex} not found`);
+  }
+
+  return { cell, cellIndex };
 }
 
 /**
@@ -138,6 +203,14 @@ function registerCreateNotebookCommand(
       }
 
       await notebook.context.ready;
+
+      // Persist cell IDs by saving newly created notebooks as nbformat 4.5+.
+      const model = getNotebookModel(notebook);
+      const sharedModel = model.sharedModel as YNotebook;
+      if (sharedModel.nbformat_minor < 5) {
+        sharedModel.nbformat_minor = 5;
+      }
+
       await notebook.context.save();
 
       return {
@@ -175,6 +248,11 @@ function registerAddCellCommand(
             description:
               'Path to the notebook file. If not provided, uses the currently active notebook'
           },
+          referenceCellId: {
+            type: 'string',
+            description:
+              'nbformat cell ID of the reference cell. If not provided, uses the currently active cell'
+          },
           content: {
             type: 'string',
             description: 'Content to add to the cell'
@@ -185,7 +263,8 @@ function registerAddCellCommand(
           },
           position: {
             type: 'string',
-            description: 'Position relative to current cell (above or below)'
+            description:
+              'Position relative to the reference or active cell (above or below)'
           },
           background: {
             type: 'boolean',
@@ -198,6 +277,7 @@ function registerAddCellCommand(
     execute: async (args: any) => {
       const {
         notebookPath,
+        referenceCellId,
         background,
         content = null,
         cellType = 'code',
@@ -219,18 +299,30 @@ function registerAddCellCommand(
       }
 
       const notebook = currentWidget.content;
-      const model = notebook.model;
+      const model = getNotebookModel(currentWidget);
 
-      if (!model) {
-        throw new Error('No notebook model available');
+      if (position !== 'above' && position !== 'below') {
+        throw new Error(
+          `Invalid position '${position}'. Expected 'above' or 'below'.`
+        );
       }
 
       const shouldReplaceFirstCell =
         model.cells.length === 1 &&
         model.cells.get(0).sharedModel.getSource().trim() === '';
 
+      let insertIndex = model.cells.length;
       if (shouldReplaceFirstCell) {
         model.sharedModel.deleteCell(0);
+        insertIndex = 0;
+      } else if (model.cells.length > 0) {
+        const { cellIndex: referenceCellIndex } = getCellTarget(
+          currentWidget,
+          referenceCellId
+        );
+
+        insertIndex =
+          position === 'above' ? referenceCellIndex : referenceCellIndex + 1;
       }
 
       const newCellData = {
@@ -239,11 +331,16 @@ function registerAddCellCommand(
         metadata: cellType === 'code' ? { trusted: true } : {}
       };
 
-      model.sharedModel.addCell(newCellData);
+      model.sharedModel.insertCell(insertIndex, newCellData);
+      const newCellIndex = insertIndex;
+      const newCell = model.cells.get(newCellIndex);
+
+      if (!newCell) {
+        throw new Error('Failed to create notebook cell');
+      }
 
       if (cellType === 'markdown' && content) {
-        const cellIndex = model.cells.length - 1;
-        const cellWidget = notebook.widgets[cellIndex];
+        const cellWidget = notebook.widgets[newCellIndex];
         if (cellWidget && cellWidget instanceof MarkdownCell) {
           await cellWidget.ready;
           cellWidget.rendered = true;
@@ -253,6 +350,7 @@ function registerAddCellCommand(
       return {
         success: true,
         message: `${cellType} cell added successfully`,
+        cellId: newCell.id,
         content: content || '',
         cellType,
         position
@@ -264,7 +362,7 @@ function registerAddCellCommand(
 }
 
 /**
- * Get information about a notebook including number of cells and active cell index
+ * Get information about a notebook including cell IDs and the active cell ID
  */
 function registerGetNotebookInfoCommand(
   commands: CommandRegistry,
@@ -275,7 +373,7 @@ function registerGetNotebookInfoCommand(
     id: 'jupyterlab-ai-commands:get-notebook-info',
     label: 'Get Notebook Info',
     caption:
-      'Get information about a notebook including number of cells and active cell index',
+      'Get information about a notebook including cell IDs and the active cell ID',
     describedBy: {
       args: {
         type: 'object',
@@ -311,16 +409,20 @@ function registerGetNotebookInfoCommand(
       }
 
       const notebook = currentWidget.content;
-      const model = notebook.model;
-
-      if (!model) {
-        throw new Error('No notebook model available');
-      }
+      const model = getNotebookModel(currentWidget);
 
       const cellCount = model.cells.length;
-      const activeCellIndex = notebook.activeCellIndex;
       const activeCell = notebook.activeCell;
+      const activeCellId = activeCell?.model.id || null;
       const activeCellType = activeCell?.model.type || 'unknown';
+      const cells = Array.from({ length: cellCount }, (_, index) => {
+        const cell = model.cells.get(index);
+
+        return {
+          cellId: cell.id,
+          cellType: cell.type
+        };
+      });
       const notebookMetadata = model.metadata;
 
       return {
@@ -328,8 +430,9 @@ function registerGetNotebookInfoCommand(
         notebookName: currentWidget.title.label,
         notebookPath: currentWidget.context.path,
         cellCount,
-        activeCellIndex,
+        activeCellId,
         activeCellType,
+        cells,
         notebookMetadata,
         isDirty: model.dirty
       };
@@ -361,10 +464,10 @@ function registerGetCellInfoCommand(
             description:
               'Path to the notebook file. If not provided, uses the currently active notebook'
           },
-          cellIndex: {
-            type: 'number',
+          cellId: {
+            type: 'string',
             description:
-              'Index of the cell to get information for (0-based). If not provided, uses the currently active cell'
+              'nbformat cell ID of the cell to get information for. If not provided, uses the currently active cell'
           },
           background: {
             type: 'boolean',
@@ -375,8 +478,7 @@ function registerGetCellInfoCommand(
       }
     },
     execute: (args: any) => {
-      const { notebookPath, background } = args;
-      let { cellIndex } = args;
+      const { notebookPath, cellId, background } = args;
 
       const currentWidget = getNotebookWidget(
         notebookPath,
@@ -392,24 +494,7 @@ function registerGetCellInfoCommand(
         );
       }
 
-      const notebook = currentWidget.content;
-      const model = notebook.model;
-
-      if (!model) {
-        throw new Error('No notebook model available');
-      }
-
-      if (cellIndex === undefined || cellIndex === null) {
-        cellIndex = notebook.activeCellIndex;
-      }
-
-      if (cellIndex < 0 || cellIndex >= model.cells.length) {
-        throw new Error(
-          `Invalid cell index: ${cellIndex}. Notebook has ${model.cells.length} cells.`
-        );
-      }
-
-      const cell = model.cells.get(cellIndex);
+      const { cell } = getCellTarget(currentWidget, cellId);
       const cellType = cell.type;
       const sharedModel = cell.sharedModel;
       const source = sharedModel.getSource();
@@ -423,7 +508,6 @@ function registerGetCellInfoCommand(
       return {
         success: true,
         cellId: cell.id,
-        cellIndex,
         cellType,
         source,
         outputs,
@@ -460,12 +544,7 @@ function registerSetCellContentCommand(
           cellId: {
             type: 'string',
             description:
-              'ID of the cell to modify. If provided, takes precedence over cellIndex'
-          },
-          cellIndex: {
-            type: 'number',
-            description:
-              'Index of the cell to modify (0-based). Used if cellId is not provided. If neither is provided, targets the active cell'
+              'nbformat cell ID of the cell to modify. If not provided, targets the currently active cell'
           },
           content: {
             type: 'string',
@@ -494,7 +573,6 @@ function registerSetCellContentCommand(
       const {
         notebookPath,
         cellId,
-        cellIndex,
         content,
         background,
         showDiff = true,
@@ -515,45 +593,8 @@ function registerSetCellContentCommand(
         );
       }
 
-      const notebook = notebookWidget.content;
       const targetNotebookPath = notebookWidget.context.path;
-
-      const model = notebook.model;
-
-      if (!model) {
-        throw new Error('No notebook model available');
-      }
-
-      let targetCellIndex: number;
-      if (cellId !== undefined && cellId !== null) {
-        targetCellIndex = -1;
-        for (let i = 0; i < model.cells.length; i++) {
-          if (model.cells.get(i).id === cellId) {
-            targetCellIndex = i;
-            break;
-          }
-        }
-        if (targetCellIndex === -1) {
-          throw new Error(`Cell with ID '${cellId}' not found in notebook`);
-        }
-      } else if (cellIndex !== undefined && cellIndex !== null) {
-        if (cellIndex < 0 || cellIndex >= model.cells.length) {
-          throw new Error(
-            `Invalid cell index: ${cellIndex}. Notebook has ${model.cells.length} cells.`
-          );
-        }
-        targetCellIndex = cellIndex;
-      } else {
-        targetCellIndex = notebook.activeCellIndex;
-        if (targetCellIndex === -1 || targetCellIndex >= model.cells.length) {
-          throw new Error('No active cell or invalid active cell index');
-        }
-      }
-
-      const targetCell = model.cells.get(targetCellIndex);
-      if (!targetCell) {
-        throw new Error(`Cell at index ${targetCellIndex} not found`);
-      }
+      const { cell: targetCell } = getCellTarget(notebookWidget, cellId);
 
       const sharedModel = targetCell.sharedModel;
       const previousContent = sharedModel.getSource();
@@ -584,16 +625,13 @@ function registerSetCellContentCommand(
         message:
           cellId !== undefined && cellId !== null
             ? `Cell with ID '${cellId}' content replaced successfully`
-            : cellIndex !== undefined && cellIndex !== null
-              ? `Cell ${targetCellIndex} content replaced successfully`
-              : 'Active cell content replaced successfully',
+            : 'Active cell content replaced successfully',
         notebookPath: targetNotebookPath,
         cellId: retrievedCellId,
-        cellIndex: targetCellIndex,
         previousContent,
         previousCellType,
         newContent: content,
-        wasActiveCell: cellId === undefined && cellIndex === undefined,
+        wasActiveCell: cellId === undefined || cellId === null,
         diffShown: shouldShowDiff && previousContent !== content
       };
     }
@@ -603,7 +641,7 @@ function registerSetCellContentCommand(
 }
 
 /**
- * Run a specific cell in the notebook by index
+ * Run a specific cell in the notebook by nbformat cell ID
  */
 function registerRunCellCommand(
   commands: CommandRegistry,
@@ -613,7 +651,7 @@ function registerRunCellCommand(
   const command = {
     id: 'jupyterlab-ai-commands:run-cell',
     label: 'Run Cell',
-    caption: 'Run a specific cell in the notebook by index',
+    caption: 'Run a specific cell in the notebook by nbformat cell ID',
     describedBy: {
       args: {
         type: 'object',
@@ -623,9 +661,9 @@ function registerRunCellCommand(
             description:
               'Path to the notebook file. If not provided, uses the currently active notebook'
           },
-          cellIndex: {
-            type: 'number',
-            description: 'Index of the cell to run (0-based)'
+          cellId: {
+            type: 'string',
+            description: 'nbformat cell ID of the cell to run'
           },
           recordTiming: {
             type: 'boolean',
@@ -637,11 +675,11 @@ function registerRunCellCommand(
               'Whether to avoid activating the Notebook widget so as not to disturb the user (default: true)'
           }
         },
-        required: ['cellIndex']
+        required: ['cellId']
       }
     },
     execute: async (args: any) => {
-      const { notebookPath, cellIndex, background, recordTiming = true } = args;
+      const { notebookPath, cellId, background, recordTiming = true } = args;
 
       const currentWidget = getNotebookWidget(
         notebookPath,
@@ -658,21 +696,14 @@ function registerRunCellCommand(
       }
 
       const notebook = currentWidget.content;
-      const model = notebook.model;
-
-      if (!model) {
-        throw new Error('No notebook model available');
-      }
-
-      if (cellIndex < 0 || cellIndex >= model.cells.length) {
-        throw new Error(
-          `Invalid cell index: ${cellIndex}. Notebook has ${model.cells.length} cells.`
-        );
-      }
-
-      const cellWidget = notebook.widgets[cellIndex];
+      const model = getNotebookModel(currentWidget);
+      const { cellIndex: targetCellIndex } = getCellTarget(
+        currentWidget,
+        cellId
+      );
+      const cellWidget = notebook.widgets[targetCellIndex];
       if (!cellWidget) {
-        throw new Error(`Cell widget at index ${cellIndex} not found`);
+        throw new Error(`Cell widget with ID '${cellId}' not found`);
       }
 
       if (cellWidget instanceof CodeCell) {
@@ -685,16 +716,16 @@ function registerRunCellCommand(
         const codeModel = cellWidget.model as ICodeCellModel;
         return {
           success: true,
-          message: `Cell ${cellIndex} executed successfully`,
-          cellIndex,
+          message: `Cell with ID '${cellId}' executed successfully`,
+          cellId,
           executionCount: codeModel.executionCount,
           hasOutput: codeModel.outputs.length > 0
         };
       } else {
         return {
           success: true,
-          message: `Cell ${cellIndex} is not a code cell, no execution needed`,
-          cellIndex,
+          message: `Cell with ID '${cellId}' is not a code cell, no execution needed`,
+          cellId,
           cellType: cellWidget.model.type
         };
       }
@@ -705,7 +736,7 @@ function registerRunCellCommand(
 }
 
 /**
- * Delete a specific cell from the notebook by index
+ * Delete a specific cell from the notebook by nbformat cell ID
  */
 function registerDeleteCellCommand(
   commands: CommandRegistry,
@@ -715,7 +746,7 @@ function registerDeleteCellCommand(
   const command = {
     id: 'jupyterlab-ai-commands:delete-cell',
     label: 'Delete Cell',
-    caption: 'Delete a specific cell from the notebook by index',
+    caption: 'Delete a specific cell from the notebook by nbformat cell ID',
     describedBy: {
       args: {
         type: 'object',
@@ -725,9 +756,9 @@ function registerDeleteCellCommand(
             description:
               'Path to the notebook file. If not provided, uses the currently active notebook'
           },
-          cellIndex: {
-            type: 'number',
-            description: 'Index of the cell to delete (0-based)'
+          cellId: {
+            type: 'string',
+            description: 'nbformat cell ID of the cell to delete'
           },
           background: {
             type: 'boolean',
@@ -735,11 +766,11 @@ function registerDeleteCellCommand(
               'Whether to avoid activating the Notebook widget so as not to disturb the user (default: true)'
           }
         },
-        required: ['cellIndex']
+        required: ['cellId']
       }
     },
     execute: (args: any) => {
-      const { notebookPath, cellIndex, background } = args;
+      const { notebookPath, cellId, background } = args;
 
       const currentWidget = getNotebookWidget(
         notebookPath,
@@ -755,30 +786,18 @@ function registerDeleteCellCommand(
         );
       }
 
-      const notebook = currentWidget.content;
-      const model = notebook.model;
+      const model = getNotebookModel(currentWidget);
+      const { cellIndex: targetCellIndex } = getCellTarget(
+        currentWidget,
+        cellId
+      );
 
-      if (!model) {
-        throw new Error('No notebook model available');
-      }
-
-      if (cellIndex < 0 || cellIndex >= model.cells.length) {
-        throw new Error(
-          `Invalid cell index: ${cellIndex}. Notebook has ${model.cells.length} cells.`
-        );
-      }
-
-      const targetCell = model.cells.get(cellIndex);
-      if (!targetCell) {
-        throw new Error(`Cell at index ${cellIndex} not found`);
-      }
-
-      model.sharedModel.deleteCell(cellIndex);
+      model.sharedModel.deleteCell(targetCellIndex);
 
       return {
         success: true,
-        message: `Cell ${cellIndex} deleted successfully`,
-        cellIndex,
+        message: `Cell with ID '${cellId}' deleted successfully`,
+        cellId,
         remainingCells: model.cells.length
       };
     }
