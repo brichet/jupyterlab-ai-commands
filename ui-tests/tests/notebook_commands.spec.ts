@@ -1,6 +1,7 @@
 import type { Locator } from '@playwright/test';
 import type { IJupyterLabPageFixture } from '@jupyterlab/galata';
 import { expect, test } from '@jupyterlab/galata';
+import { executeCommand } from './utils/commands';
 
 const COMMANDS = {
   addCell: 'jupyterlab-ai-commands:add-cell',
@@ -12,20 +13,6 @@ const COMMANDS = {
   saveNotebook: 'jupyterlab-ai-commands:save-notebook',
   setCellContent: 'jupyterlab-ai-commands:set-cell-content'
 } as const;
-
-async function executeCommand(
-  page: IJupyterLabPageFixture,
-  command: string,
-  args: Record<string, unknown> = {}
-): Promise<any> {
-  return page.evaluate(
-    async ({ args, command }) => {
-      await window.jupyterapp.started;
-      return await window.jupyterapp.commands.execute(command, args);
-    },
-    { args: { background: false, ...args }, command }
-  );
-}
 
 async function getCellInputLocator(
   page: IJupyterLabPageFixture,

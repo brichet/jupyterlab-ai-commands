@@ -2,6 +2,8 @@ import { Kernel, KernelMessage, KernelSpec } from '@jupyterlab/services';
 import * as nbformat from '@jupyterlab/nbformat';
 import { CommandRegistry } from '@lumino/commands';
 
+import { findKernelByLanguage } from './kernel-utils';
+
 /**
  * Information about a running kernel
  */
@@ -25,57 +27,19 @@ interface IKernelSpecInfo {
 type KernelExecutionStatus = 'ok' | 'error' | 'abort';
 
 /**
- * Kernel execution output format (nbformat)
- */
-type KernelExecutionOutput = nbformat.IOutput;
-
-/**
  * Result of kernel code execution
  */
 interface IKernelExecutionResult {
   success: boolean;
   status: KernelExecutionStatus;
   executionCount: nbformat.ExecutionCount;
-  outputs: KernelExecutionOutput[];
+  outputs: nbformat.IOutput[];
+  message: string;
+  kernelId: string;
+  outputCount: number;
   errorName?: string;
   errorValue?: string;
   traceback?: string[];
-}
-
-/**
- * Find a kernel by language, returning the kernel spec name
- */
-async function findKernelByLanguage(
-  kernelSpecManager: KernelSpec.IManager,
-  language?: string | null
-): Promise<string> {
-  await kernelSpecManager.ready;
-  const specs = kernelSpecManager.specs;
-
-  if (!specs || !specs.kernelspecs) {
-    return 'python3';
-  }
-
-  if (!language) {
-    return specs.default || Object.keys(specs.kernelspecs)[0] || 'python3';
-  }
-
-  const normalizedLanguage = language.toLowerCase().trim();
-
-  for (const [kernelName, kernelSpec] of Object.entries(specs.kernelspecs)) {
-    if (!kernelSpec) {
-      continue;
-    }
-
-    const kernelLanguage = kernelSpec.language?.toLowerCase() || '';
-
-    if (kernelLanguage === normalizedLanguage) {
-      return kernelName;
-    }
-  }
-
-  console.warn(`No kernel found for language '${language}', using default`);
-  return specs.default || Object.keys(specs.kernelspecs)[0] || 'python3';
 }
 
 /**
@@ -97,12 +61,12 @@ function registerStartKernelCommand(
           language: {
             type: 'string',
             description:
-              'The programming language for the kernel (e.g., python, r, julia). If not provided, uses system default.'
+              'The programming language for the kernel (for example python, r, or julia). If omitted, the default kernel is used.'
           },
           kernelName: {
             type: 'string',
             description:
-              'The specific kernel spec name to use (e.g., python3, ir). If provided, takes precedence over language.'
+              'The specific kernel spec name to use (for example python3 or ir). If provided, it takes precedence over language.'
           }
         }
       }
@@ -113,6 +77,14 @@ function registerStartKernelCommand(
       let targetKernelName: string;
 
       if (kernelName) {
+        await kernelSpecManager.ready;
+        const specs = kernelSpecManager.specs;
+        if (!specs || !specs.kernelspecs) {
+          throw new Error('No kernelspecs are available');
+        }
+        if (!specs.kernelspecs[kernelName]) {
+          throw new Error(`No kernel spec found with name '${kernelName}'`);
+        }
         targetKernelName = kernelName;
       } else {
         targetKernelName = await findKernelByLanguage(
@@ -168,12 +140,12 @@ function registerExecuteInKernelCommand(
           silent: {
             type: 'boolean',
             description:
-              'If true, signals the kernel to execute the code quietly without broadcasting output (default: false)'
+              'If true, execute quietly without broadcasting output (default: false)'
           },
           storeHistory: {
             type: 'boolean',
             description:
-              'If true, the code will be stored in the kernel execution history (default: true)'
+              'If true, store the code in the kernel execution history (default: true)'
           },
           stopOnError: {
             type: 'boolean',
@@ -215,12 +187,22 @@ function registerExecuteInKernelCommand(
         throw new Error(`No running kernel found with ID: ${kernelId}`);
       }
 
-      const outputs: KernelExecutionOutput[] = [];
+      const outputs: nbformat.IOutput[] = [];
+      let pendingClear = false;
       let executionCount: number | null = null;
       let status: KernelExecutionStatus = 'ok';
       let errorName: string | undefined;
       let errorValue: string | undefined;
       let traceback: string[] | undefined;
+
+      const flushPendingClear = () => {
+        if (!pendingClear) {
+          return;
+        }
+
+        outputs.length = 0;
+        pendingClear = false;
+      };
 
       const future = kernel.requestExecute({
         code,
@@ -232,12 +214,32 @@ function registerExecuteInKernelCommand(
       });
 
       future.onIOPub = (msg: KernelMessage.IIOPubMessage) => {
+        if (KernelMessage.isClearOutputMsg(msg)) {
+          if (msg.content.wait) {
+            pendingClear = true;
+          } else {
+            outputs.length = 0;
+            pendingClear = false;
+          }
+          return;
+        }
+
+        flushPendingClear();
+
         if (KernelMessage.isStreamMsg(msg)) {
-          outputs.push({
-            output_type: 'stream',
-            name: msg.content.name,
-            text: msg.content.text
-          });
+          const lastOutput = outputs[outputs.length - 1];
+          if (
+            lastOutput?.output_type === 'stream' &&
+            lastOutput.name === msg.content.name
+          ) {
+            lastOutput.text += msg.content.text;
+          } else {
+            outputs.push({
+              output_type: 'stream',
+              name: msg.content.name,
+              text: msg.content.text
+            });
+          }
           return;
         }
 
@@ -279,28 +281,45 @@ function registerExecuteInKernelCommand(
         }
       };
 
-      const reply = await future.done;
+      try {
+        const reply = await future.done;
+        const replyContent = reply.content;
 
-      if (reply.content.status === 'ok') {
-        executionCount = (reply.content as KernelMessage.IExecuteReply)
-          .execution_count;
-      } else if (reply.content.status === 'error') {
+        if (replyContent.status === 'ok') {
+          executionCount = replyContent.execution_count;
+        } else if (replyContent.status === 'error') {
+          status = 'error';
+          errorName = replyContent.ename;
+          errorValue = replyContent.evalue;
+          traceback = replyContent.traceback;
+        } else if (replyContent.status === 'abort') {
+          status = 'abort';
+        }
+      } catch (error) {
         status = 'error';
-        const errorContent = reply.content as KernelMessage.IReplyErrorContent;
-        errorName = errorContent.ename;
-        errorValue = errorContent.evalue;
-        traceback = errorContent.traceback;
-      } else if (reply.content.status === 'abort') {
-        status = 'abort';
+        const errorOutput = outputs.find(nbformat.isError);
+        errorName = errorOutput?.ename || 'ExecutionError';
+        errorValue =
+          errorOutput?.evalue ||
+          (error instanceof Error ? error.message : String(error));
+        traceback = errorOutput?.traceback;
+      } finally {
+        kernel.dispose();
       }
-
-      kernel.dispose();
 
       const result: IKernelExecutionResult = {
         success: status === 'ok',
         status,
         executionCount,
-        outputs
+        outputs,
+        message:
+          status === 'ok'
+            ? 'Kernel execution completed successfully'
+            : status === 'abort'
+              ? 'Kernel execution was aborted'
+              : 'Kernel execution failed',
+        kernelId,
+        outputCount: outputs.length
       };
 
       if (status === 'error') {
@@ -415,7 +434,10 @@ function registerListKernelSpecsCommand(
     label: 'List Kernel Specs',
     caption: 'List all available kernel specs',
     describedBy: {
-      args: {}
+      args: {
+        type: 'object',
+        properties: {}
+      }
     },
     execute: async () => {
       await kernelSpecManager.ready;
