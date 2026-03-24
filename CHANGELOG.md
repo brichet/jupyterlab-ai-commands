@@ -2,6 +2,25 @@
 
 <!-- <START NEW CHANGELOG ENTRY> -->
 
+## 0.3.1
+
+([Full Changelog](https://github.com/jupyter-ai-contrib/jupyterlab-ai-commands/compare/v0.3.0...a52ac46a88c17987d625ea862b453f1e6dcee79b))
+
+### Bugs fixed
+
+- Fix active cell tracking [#21](https://github.com/jupyter-ai-contrib/jupyterlab-ai-commands/pull/21) ([@jtpio](https://github.com/jtpio))
+
+### Contributors to this release
+
+The following people contributed discussions, new ideas, code and documentation contributions, and review.
+See [our definition of contributors](https://github-activity.readthedocs.io/en/latest/use/#how-does-this-tool-define-contributions-in-the-reports).
+
+([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyterlab-ai-commands/graphs/contributors?from=2026-03-24&to=2026-03-24&type=c))
+
+@jtpio ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyterlab-ai-commands+involves%3Ajtpio+updated%3A2026-03-24..2026-03-24&type=Issues))
+
+<!-- <END NEW CHANGELOG ENTRY> -->
+
 ## 0.3.0
 
 ([Full Changelog](https://github.com/jupyter-ai-contrib/jupyterlab-ai-commands/compare/v0.2.1...d146faea5751845ed10367aa4a23cd5563070ad4))
@@ -24,8 +43,6 @@ See [our definition of contributors](https://github-activity.readthedocs.io/en/l
 ([GitHub contributors page for this release](https://github.com/jupyter-ai-contrib/jupyterlab-ai-commands/graphs/contributors?from=2026-01-27&to=2026-03-24&type=c))
 
 @brichet ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyterlab-ai-commands+involves%3Abrichet+updated%3A2026-01-27..2026-03-24&type=Issues)) | @jtpio ([activity](https://github.com/search?q=repo%3Ajupyter-ai-contrib%2Fjupyterlab-ai-commands+involves%3Ajtpio+updated%3A2026-01-27..2026-03-24&type=Issues))
-
-<!-- <END NEW CHANGELOG ENTRY> -->
 
 ## 0.2.1
 
