@@ -28,7 +28,7 @@ const plugin: JupyterFrontEndPlugin<void> = {
     editorTracker?: IEditorTracker,
     notebookTracker?: INotebookTracker,
     settingRegistry?: ISettingRegistry,
-    translator?:ITranslator
+    translator?: ITranslator
   ) => {
     console.log('JupyterLab extension jupyterlab-ai-commands is activated!');
 
