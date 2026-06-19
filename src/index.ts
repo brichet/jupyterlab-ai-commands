@@ -1,4 +1,5 @@
 import {
+  ILabShell,
   JupyterFrontEnd,
   JupyterFrontEndPlugin
 } from '@jupyterlab/application';
@@ -10,6 +11,7 @@ import { ISettingRegistry } from '@jupyterlab/settingregistry';
 
 import { registerFileCommands } from './file-commands';
 import { registerKernelCommands } from './kernel-commands';
+import { registerLayoutCommands } from './layout-commands';
 import { registerNotebookCommands } from './notebook-commands';
 
 /**
@@ -20,11 +22,12 @@ const plugin: JupyterFrontEndPlugin<void> = {
   description: 'A set of commands for AI in JupyterLab',
   autoStart: true,
   requires: [IDocumentManager],
-  optional: [IEditorTracker, INotebookTracker, ISettingRegistry],
+  optional: [IEditorTracker, ILabShell, INotebookTracker, ISettingRegistry],
   activate: (
     app: JupyterFrontEnd,
     docManager: IDocumentManager,
     editorTracker?: IEditorTracker,
+    labShell?: ILabShell,
     notebookTracker?: INotebookTracker,
     settingRegistry?: ISettingRegistry
   ) => {
@@ -51,6 +54,11 @@ const plugin: JupyterFrontEndPlugin<void> = {
       commands,
       kernelManager,
       kernelSpecManager: serviceManager.kernelspecs
+    });
+
+    registerLayoutCommands({
+      commands,
+      labShell
     });
 
     if (settingRegistry) {
