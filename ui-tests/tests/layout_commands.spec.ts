@@ -54,6 +54,11 @@ test.describe('Layout Commands', () => {
     await expect(page.locator('.lm-DockPanel-tabBar')).toHaveCount(
       tabBarsBefore + 1
     );
+
+    // Verify the correct widget (the active notebook) was repositioned
+    await expect(
+      page.locator('.lm-TabBar-tabLabel').filter({ hasText: 'test-split-right' })
+    ).toBeVisible();
   });
 
   test('should split a specific widget by ID to the left', async ({
@@ -85,6 +90,23 @@ test.describe('Layout Commands', () => {
     await expect(page.locator('.lm-DockPanel-tabBar')).toHaveCount(
       tabBarsBefore + 1
     );
+
+    // Verify notebook1 was moved and is in a different tab bar than notebook2
+    await expect(
+      page.locator('.lm-TabBar-tabLabel').filter({ hasText: 'reposition-nb1' })
+    ).toBeVisible();
+    await expect(
+      page.locator('.lm-TabBar-tabLabel').filter({ hasText: 'reposition-nb2' })
+    ).toBeVisible();
+    const inDifferentTabBars = await page.evaluate(() => {
+      const labels = Array.from(document.querySelectorAll('.lm-TabBar-tabLabel'));
+      const nb1Label = labels.find(l => l.textContent?.includes('reposition-nb1'));
+      const nb2Label = labels.find(l => l.textContent?.includes('reposition-nb2'));
+      const nb1TabBar = nb1Label?.closest('.lm-DockPanel-tabBar');
+      const nb2TabBar = nb2Label?.closest('.lm-DockPanel-tabBar');
+      return !!nb1TabBar && !!nb2TabBar && nb1TabBar !== nb2TabBar;
+    });
+    expect(inDifferentTabBars).toBe(true);
   });
 
   test('should move a widget to the right sidebar area', async ({
@@ -105,9 +127,9 @@ test.describe('Layout Commands', () => {
       area: 'right'
     });
 
-    // The widget should now be in the right sidebar.
-    await expect(page.sidebar.getContentPanelLocator('right')).toContainText(
-      'test-move-to-right'
-    );
+    // The widget should now be in the right sidebar — its title appears in the active tab.
+    await expect(
+      page.sidebar.getTabBarLocator('right').locator('.lm-TabBar-tab.lm-mod-current')
+    ).toContainText('test-move-to-right');
   });
 });
