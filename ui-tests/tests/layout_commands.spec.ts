@@ -57,7 +57,9 @@ test.describe('Layout Commands', () => {
 
     // Verify the correct widget (the active notebook) was repositioned
     await expect(
-      page.locator('.lm-TabBar-tabLabel').filter({ hasText: 'test-split-right' })
+      page
+        .locator('.lm-TabBar-tabLabel')
+        .filter({ hasText: 'test-split-right' })
     ).toBeVisible();
   });
 
@@ -99,9 +101,15 @@ test.describe('Layout Commands', () => {
       page.locator('.lm-TabBar-tabLabel').filter({ hasText: 'reposition-nb2' })
     ).toBeVisible();
     const inDifferentTabBars = await page.evaluate(() => {
-      const labels = Array.from(document.querySelectorAll('.lm-TabBar-tabLabel'));
-      const nb1Label = labels.find(l => l.textContent?.includes('reposition-nb1'));
-      const nb2Label = labels.find(l => l.textContent?.includes('reposition-nb2'));
+      const labels = Array.from(
+        document.querySelectorAll('.lm-TabBar-tabLabel')
+      );
+      const nb1Label = labels.find(l =>
+        l.textContent?.includes('reposition-nb1')
+      );
+      const nb2Label = labels.find(l =>
+        l.textContent?.includes('reposition-nb2')
+      );
       const nb1TabBar = nb1Label?.closest('.lm-DockPanel-tabBar');
       const nb2TabBar = nb2Label?.closest('.lm-DockPanel-tabBar');
       return !!nb1TabBar && !!nb2TabBar && nb1TabBar !== nb2TabBar;
@@ -129,7 +137,9 @@ test.describe('Layout Commands', () => {
 
     // The widget should now be in the right sidebar — its title appears in the active tab.
     await expect(
-      page.sidebar.getTabBarLocator('right').locator('.lm-TabBar-tab.lm-mod-current')
+      page.sidebar
+        .getTabBarLocator('right')
+        .locator('.lm-TabBar-tab.lm-mod-current')
     ).toContainText('test-move-to-right');
   });
 });
